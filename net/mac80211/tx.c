@@ -1954,7 +1954,7 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
         if (likely(info->control.vif->type != NL80211_IFTYPE_MONITOR)) {
             ieee80211_set_qos_hdr(sdata, skb);
         }
-	ieee80211_tx(sdata, sta, skb, false, txdata_flags);
+	ieee80211_tx(sdata, sta, skb, false);
 }
 
 static bool ieee80211_parse_tx_radiotap(struct ieee80211_local *local,

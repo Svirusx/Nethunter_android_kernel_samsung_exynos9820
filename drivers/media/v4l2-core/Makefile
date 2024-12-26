@@ -2,6 +2,7 @@
 #
 # Makefile for the V4L2 core
 #
+EXTRA_CFLAGS += -Wno-incompatible-function-pointer-types
 
 tuner-objs	:=	tuner-core.o
 

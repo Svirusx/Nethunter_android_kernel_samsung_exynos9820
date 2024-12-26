@@ -2,7 +2,7 @@
 #
 # Makefile for Linux kernel SUN RPC
 #
-
+EXTRA_CFLAGS += -Wno-incompatible-function-pointer-types
 
 obj-$(CONFIG_SUNRPC) += sunrpc.o
 obj-$(CONFIG_SUNRPC_GSS) += auth_gss/

@@ -2,6 +2,7 @@
 #
 # Makefile for the Linux nfs server
 #
+EXTRA_CFLAGS += -Wno-enum-conversion
 
 ccflags-y += -I$(src)			# needed for trace events
 
