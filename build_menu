@@ -1,0 +1,192 @@
+#!/bin/bash
+
+
+# Variables
+DIR=`readlink -f .`
+PARENT_DIR=`readlink -f ${DIR}/..`
+
+export PLATFORM_VERSION=14
+export ANDROID_MAJOR_VERSION=s
+export SEC_BUILD_CONF_VENDOR_BUILD_OS=14
+export CROSS_COMPILE=$PARENT_DIR/aarch64-linux-android-4.9/bin/aarch64-linux-android-
+export CLANG_TRIPLE=$PARENT_DIR/clang/bin/aarch64-linux-gnu-
+export ARCH=arm64
+export LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN=$PARENT_DIR/aarch64-linux-android-4.9/bin
+export CLANG_PREBUILT_BIN=$PARENT_DIR/clang/bin
+export PATH=$PATH:$LINUX_GCC_CROSS_COMPILE_PREBUILTS_BIN:$CLANG_PREBUILT_BIN
+export LLVM=1
+
+export CHIPSET_NAME=exynos9820
+export RELEASENAME=WirusMOD
+
+#export USE_CCACHE=1
+#export CCACHE_EXEC=/usr/bin/ccache
+#export CCACHE_DIR=/mnt/ccache
+#ccache -M 50G -F 0
+
+
+toolchain(){
+  if [ ! -d $PARENT_DIR/aarch64-linux-android-4.9 ]; then
+    pause 'clone Toolchain aarch64-linux-android-4.9 cross compiler'
+    git clone --branch android-14.0.0_r0.140 https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 $PARENT_DIR/aarch64-linux-android-4.9
+    . $DIR/build_menu
+  fi
+}
+
+clang(){
+  if [ ! -d $PARENT_DIR/clang ]; then
+    pause 'clone Android Clang/LLVM Prebuilts'
+    mkdir $PARENT_DIR/clang
+    wget -O $PARENT_DIR/clang/clang-r530567.tar.gz https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz
+    tar -xzf $PARENT_DIR/clang/clang-r530567.tar.gz -C ~/clang
+    . $DIR/build_menu
+  fi
+}
+
+clean(){
+  echo "${GREEN}***** Cleaning in Progress *****${STD}"
+  make clean -j$(nproc)
+  make mrproper -j$(nproc)
+  [ -d "out" ] && rm -rf out
+  echo "${GREEN}***** Cleaning Done *****${STD}"
+}
+
+build_kernel(){
+  KERNEL_MAKE_ENV="LOCALVERSION=-WirusMOD"
+  [ ! -d "out" ] && mkdir out
+  make -j$(nproc) -C $(pwd) $KERNEL_MAKE_ENV wirus_defconfig
+  make -j$(nproc) -C $(pwd) $KERNEL_MAKE_ENV
+
+  [ -e arch/arm64/boot/Image.gz ] && cp arch/arm64/boot/Image.gz $(pwd)/out/Image.gz
+  if [ -e arch/arm64/boot/Image ]; then
+    cp arch/arm64/boot/Image $(pwd)/out/Image
+
+    DTB_DIR=$(pwd)/arch/arm64/boot/dts
+    #$(pwd)/tools/mkdtimg cfg_create $(pwd)/out/dtb.img dt.configs/${CHIPSET_NAME}.cfg -d ${DTB_DIR}/exynos
+    #$(pwd)/tools/mkdtimg cfg_create $(pwd)/out/dtbo.img dt.configs/${VARIANT}.cfg -d ${DTB_DIR}/samsung/${VARIANT}
+    
+    DTBO_FILES=$(find ${DTB_DIR}/samsung/ -name "${CHIPSET_NAME}-${VARIANT}_*.dtbo")
+    cat ${DTB_DIR}/exynos/${CHIPSET_NAME}*.dtb > $(pwd)/out/dtb.img
+    $(pwd)/tools/mkdtimg create $(pwd)/out/dtbo.img --page_size=4096 ${DTBO_FILES}
+    echo "${GREEN}***** Ready to Roar *****${STD}"
+  else
+    echo 'Error'
+  fi
+}
+
+install-kernel-modules(){
+    [ -d "$2" ] && rm -rf $2
+    mkdir -p $2
+    sed -e 's/\(.*kernel.*\):/\/\1:/g' -e 's/ \([^ ]*kernel[^ ]*\)/ \/\1/g' $1/modules.dep > $2/modules.dep
+    cp $1/modules.softdep $2
+    cp $1/modules.alias $2
+    for MOD in $modules; do
+        MODULE="$(basename $MOD)"
+        sed -i "s|\(.*kernel.*\)\/$MODULE:|/lib/modules/$MODULE:|" $2/modules.dep
+        sed -i "s| \([^ ]*kernel.*\)\/$MODULE| /lib/modules/$MODULE|" $2/modules.dep
+        basename $MOD >> $2/modules.load;
+        cp $MOD $2
+    done
+}
+
+build_kernel_modules(){
+  if [ -e $DIR/arch/arm64/boot/Image ]; then
+    # Build modules
+    echo "${GREEN}***** Installing Kernel Modules *****${STD}"
+    [ ! -d "out/tmp_modules" ] && mkdir -p out/tmp_modules
+    make -j$(nproc) -C $(pwd) $KERNEL_MAKE_ENV modules
+    make -j$(nproc) -C $(pwd) $KERNEL_MAKE_ENV INSTALL_MOD_STRIP=1 INSTALL_MOD_PATH=$(pwd)/out/tmp_modules modules_install
+
+    kernel_release=$(cat include/config/kernel.release)
+    kernel_modules_dir=$DIR/out/tmp_modules/lib/modules/$kernel_release
+    kernel_modules_out=$DIR/out/lib/modules
+    modules=$(find $kernel_modules_dir -type f -name '*.ko');
+
+    install-kernel-modules $kernel_modules_dir $kernel_modules_out
+    [ -d "out/tmp_modules" ] && rm -rf out/tmp_modules
+    echo "${GREEN}***** Ready to Roar *****${STD}"
+    pause 'continue'
+  else
+    pause 'return to Main menu' 'Build kernel first, '
+  fi
+}
+
+anykernel3(){
+  if [ ! -d $PARENT_DIR/AnyKernel3 ]; then
+    pause 'clone AnyKernel3 - Flashable Zip Template'
+    git clone https://github.com/osm0sis/AnyKernel3 $PARENT_DIR/AnyKernel3
+  fi
+  [ -e $PARENT_DIR/${VARIANT}_kernel.zip ] && rm $PARENT_DIR/${VARIANT}_kernel.zip
+  if [ -e $DIR/arch/arm64/boot/Image ]; then
+    cd $PARENT_DIR/AnyKernel3
+    git reset --hard
+    cp $DIR/arch/arm64/boot/Image zImage
+    cp $DIR/out/dtbo.img dtbo.img
+    sed -i "s/ExampleKernel by osm0sis/WirusMOD/g" anykernel.sh
+    sed -i "s/=maguro/=beyond0lte/g" anykernel.sh
+    sed -i "s/=toroplus/=/g" anykernel.sh
+    sed -i "s/=toro/=/g" anykernel.sh
+    sed -i "s/=tuna/=/g" anykernel.sh
+    sed -i "s/omap\/omap_hsmmc\.0\/by-name\/boot/13d60000\.ufs\/by-name\/boot/g" anykernel.sh
+    sed -i "s/backup_file/#backup_file/g" anykernel.sh
+    sed -i "s/replace_string/#replace_string/g" anykernel.sh
+    sed -i "s/insert_line/#insert_line/g" anykernel.sh
+    sed -i "s/append_file/#append_file/g" anykernel.sh
+    sed -i "s/patch_fstab/#patch_fstab/g" anykernel.sh
+    sed -i "s/## end boot install/flash_dtbo/g" anykernel.sh
+
+    zip -r9 $PARENT_DIR/${RELEASENAME}.zip * -x .git README.md *placeholder
+    cd $DIR
+  else
+    echo 'Done building Flashable zip for ${VARIANT}'
+  fi
+}
+
+build_kernel_beyond0lte(){
+  read -p "Enter Kernel Release Version v" harikernelver
+  VARIANT=beyond0lte
+  build_kernel
+  curtime=`date +"%m_%d_%H%M"`
+  anykernel3
+#  clean
+}
+
+
+# Run once
+toolchain
+clang
+
+# Show menu
+show_menus(){
+  echo "${ON_BLUE} B U I L D - M E N U ${STD}"
+  echo "1. build_kernel_beyond0lte"
+  echo "5. Build kernel ${Under_Line}m${STD}odules"
+  echo "6. ${Under_Line}C${STD}lean"
+  echo "7. Make ${Under_Line}f${STD}lashable zip"
+  echo "8. E${Under_Line}x${STD}it"
+}
+
+# Read input
+read_options(){
+  local choice
+  read -p "Enter choice [ 1 - 8] " choice
+  case $choice in
+    1|b|B) build_kernel_beyond0lte ;;
+    5|m|M) build_kernel_modules ;;
+    6|c|C) clean ;;
+    7|f|F) anykernel3;;
+    8|x|X) exit 0;;
+    *) pause 'return to Main menu' 'Invalid option, '
+  esac
+}
+
+# Trap CTRL+C, CTRL+Z and quit singles
+trap '' SIGINT SIGQUIT SIGTSTP
+
+# Step # Main logic - infinite loop
+while true
+do
+  show_menus
+  read_options
+done
+
